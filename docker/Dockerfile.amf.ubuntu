@@ -53,6 +53,8 @@ RUN apt-get update && \
       libboost-all-dev \
       nlohmann-json3-dev \
       libfmt-dev \
+      meson \
+      ninja-build \
   && rm -rf /var/lib/apt/lists/*
 
 # ---- Build Pistache from source (required for Ubuntu 22.04) ----
