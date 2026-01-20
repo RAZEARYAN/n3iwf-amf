@@ -31,6 +31,8 @@
 
 constexpr auto kStatisticGnbStatusConnected    = "Connected";
 constexpr auto kStatisticGnbStatusDisconnected = "Disconnected";
+constexpr auto kStatisticN3iwfStatusConnected    = "Connected";
+constexpr auto kStatisticN3iwfStatusDisconnected = "Disconnected";
 
 typedef struct {
   uint32_t gnb_id;
@@ -60,6 +62,35 @@ typedef struct {
     return s;
   }
 } gnb_infos;
+
+typedef struct {
+  uint32_t n3iwf_id;
+  // TODO: list of PLMNs
+  std::vector<SupportedTaItem> plmn_list;
+  std::string mcc;
+  std::string mnc;
+  std::string n3iwf_name;
+  std::string status;
+  uint32_t tac;
+  // long nrCellId;
+  std::string plmn_to_string() const {
+    std::string s = {};
+    for (auto supported_item : plmn_list) {
+      s.append("TAC " + std::to_string(supported_item.getTac().get()));
+      for (auto plmn_slice : supported_item.getBroadcastPlmnList()) {
+        s.append("( MCC " + plmn_slice.getPlmn().getMcc());
+        s.append(", MNC " + plmn_slice.getPlmn().getMnc());
+        for (auto slice : plmn_slice.getSNssai()) {
+          s.append(
+              "(SST " + slice.getSstStr() + ", SD " + slice.getSd() + "),");
+        }
+        s.append(")");
+      }
+      s.append("),");
+    }
+    return s;
+  }
+} n3iwf_infos;
 
 typedef struct ue_info_s {
   cm_state_t cm_status;
@@ -96,6 +127,13 @@ class statistics {
    * @return std::string
    */
   std::string get_gnbs_info() const;
+
+  /*
+   * Get the statistic information for all gNBs in string format
+   * @param void
+   * @return std::string
+   */
+  std::string get_n3iwfs_info() const;
 
   /*
    * Get all the statistic information for all UEs in string format
@@ -168,9 +206,14 @@ class statistics {
    */
   uint32_t get_number_connected_gnbs() const;
 
+  void add_n3iwf(const std::shared_ptr<n3iwf_context>& n3c);
+  
  private:
+ 
   std::map<uint32_t, gnb_infos> gnbs;
   mutable std::shared_mutex m_gnbs;
+  std::map<uint32_t, n3iwf_infos> n3iwfs;
+  mutable std::shared_mutex m_n3iwfs;
   std::map<std::string, ue_info_t> ue_infos;
   mutable std::shared_mutex m_ue_infos;
 };

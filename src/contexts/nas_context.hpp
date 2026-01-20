@@ -115,6 +115,7 @@ class nas_context {
   bool is_5g_guti_present;
   bool is_auth_vectors_present;
   bool to_be_register_by_new_suci;
+  bool is_n3iwf_connection;  // true if connected via N3IWF (non-3GPP access)
 
   bool get_kamf(uint8_t index, uint8_t (&k)[AUTH_VECTOR_LENGTH_OCTETS]) const;
   static std::string fivegmm_state_to_string(const _5gmm_state_t& state);

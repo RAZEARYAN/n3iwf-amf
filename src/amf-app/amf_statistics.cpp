@@ -19,6 +19,7 @@
  *      contact@openairinterface.org
  */
 
+
 #include "amf_statistics.hpp"
 
 #include <string>
@@ -27,7 +28,7 @@
 #include "logger.hpp"
 
 //------------------------------------------------------------------------------
-statistics::statistics() : m_ue_infos(), m_gnbs() {}
+statistics::statistics() : m_ue_infos(), m_gnbs(), m_n3iwfs() {}
 
 //------------------------------------------------------------------------------
 statistics::~statistics() {}
@@ -36,6 +37,7 @@ statistics::~statistics() {}
 void statistics::display() {
   std::string out = {};
   out.append(get_gnbs_info());
+  out.append(get_n3iwfs_info());
   out.append(get_ues_info());
   Logger::amf_app().info(out);
 }
@@ -129,6 +131,67 @@ std::string statistics::get_gnbs_info() const {
               amf_conv::uint32_to_hex_string_full_format(gnb.second.gnb_id)))
           .append(
               ie_to_string(kStatisticsHalfIeLengthForGnb, gnb.second.gnb_name))
+          .append(ie_to_string(kStatisticsHalfIeLengthForGnb, plmn))
+          .append("|\n");
+      i++;
+    }
+  }
+
+  out.append(inner_indent)
+      .append(header_to_string(header_length, ""))
+      .append("|\n");
+
+  return out;
+}
+
+//------------------------------------------------------------------------------
+std::string statistics::get_n3iwfs_info() const {
+  std::string out          = {};
+  std::string inner_indent = fmt::format("{:<{}}", "", kStatisticsIndent);
+  uint8_t header_length    = 0;
+  // List of gNBs
+  uint8_t number_cols = 4;  // without column index
+  header_length       = kStatisticsHalfIndexColLength * 2 +
+                  kStatisticsHalfIeLengthForGnb * 2 * number_cols + number_cols;
+  out.append("\n");
+  out.append(inner_indent)
+      .append(header_to_string(header_length, ""))
+      .append("|\n");
+
+  out.append(inner_indent)
+      .append(header_to_string(header_length, "N3IWFs' Information"))
+      .append("|\n");
+
+  out.append(inner_indent)
+      .append(ie_to_string(kStatisticsHalfIndexColLength, "Index"))
+      .append(ie_to_string(kStatisticsHalfIeLengthForGnb, "Status"))
+      .append(ie_to_string(kStatisticsHalfIeLengthForGnb, "Global Id"))
+      .append(ie_to_string(kStatisticsHalfIeLengthForGnb, "N3IWF Name"))
+      .append(ie_to_string(kStatisticsHalfIeLengthForGnb, "PLMN"))
+      .append("|\n");
+
+  if (n3iwfs.size() == 0) {
+    out.append(inner_indent)
+        .append(ie_to_string(kStatisticsHalfIndexColLength, "-"))
+        .append(ie_to_string(kStatisticsHalfIeLengthForGnb, "-"))
+        .append(ie_to_string(kStatisticsHalfIeLengthForGnb, "-"))
+        .append(ie_to_string(kStatisticsHalfIeLengthForGnb, "-"))
+        .append(ie_to_string(kStatisticsHalfIeLengthForGnb, "-"))
+        .append("|\n");
+  } else {
+    int i = 1;
+    for (auto const& n3iwf : n3iwfs) {
+      std::string plmn = n3iwf.second.mcc + "," + n3iwf.second.mnc;
+      out.append(inner_indent)
+          .append(
+              ie_to_string(kStatisticsHalfIndexColLength, std::to_string(i)))
+          .append(
+              ie_to_string(kStatisticsHalfIeLengthForGnb, n3iwf.second.status))
+          .append(ie_to_string(
+              kStatisticsHalfIeLengthForGnb,
+              amf_conv::uint32_to_hex_string_full_format(n3iwf.second.n3iwf_id)))
+          .append(
+              ie_to_string(kStatisticsHalfIeLengthForGnb, n3iwf.second.n3iwf_name))
           .append(ie_to_string(kStatisticsHalfIeLengthForGnb, plmn))
           .append("|\n");
       i++;
@@ -316,4 +379,19 @@ void statistics::update_gnb(
 uint32_t statistics::get_number_connected_gnbs() const {
   std::shared_lock lock(m_gnbs);
   return gnbs.size();
+}
+
+//------------------------------------------------------------------------------
+void statistics::add_n3iwf(const std::shared_ptr<n3iwf_context>& n3c) {
+  n3iwf_infos n3iwf = {};
+  n3iwf.n3iwf_id    = n3c->n3iwf_id;
+  n3iwf.mcc         = n3c->plmn.mcc;
+  n3iwf.mnc         = n3c->plmn.mnc;
+  n3iwf.n3iwf_name  = n3c->n3iwf_name;
+  n3iwf.status = kStatisticN3iwfStatusConnected;
+  for (auto i : n3c->supported_ta_list) {
+    n3iwf.plmn_list.push_back(i);
+  }
+  std::unique_lock lock(m_n3iwfs);
+  n3iwfs.insert(std::pair<uint32_t, n3iwf_infos>(n3c->n3iwf_id, n3iwf));
 }

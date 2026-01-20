@@ -52,6 +52,7 @@ nas_context::nas_context() : _5g_he_av(), _5g_av(), kamf(), _5gmm_capability() {
   is_5g_guti_present                                    = false;
   is_auth_vectors_present                               = false;
   to_be_register_by_new_suci                            = false;
+  is_n3iwf_connection                                   = false;  // ADD THIS LINE
   registration_request_is_set                           = false;
   registration_request                                  = nullptr;
   nas_status                                            = CM_IDLE;

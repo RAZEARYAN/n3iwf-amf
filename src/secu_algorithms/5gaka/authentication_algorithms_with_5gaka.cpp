@@ -351,19 +351,30 @@ void Authentication_5gaka::derive_kausf(
   // oai::utils::output_wrapper::print_buffer("amf_n1", "inputstring S", S,
   // 11+netName.size); oai::utils::output_wrapper::print_buffer("amf_n1", "key
   // KEY", key, 32);
+
+  
   kdf(key, 32, S, 11 + netName.size, kausf, 32);
   // oai::utils::output_wrapper::print_buffer("amf_n1", "KDF out: Kausf", kausf,
   // 32); Logger::amf_n1().debug("derive kausf finished!");
 }
 
 void Authentication_5gaka::derive_kamf(
-    std::string imsi, uint8_t* kseaf, uint8_t* kamf, uint16_t abba) {
+    std::string imsi, uint8_t* kseaf, uint8_t* kamf, uint16_t abba, bool is_n3iwf) {
   Logger::amf_n1().debug("derive_kamf ...");
+  // ADD DEBUG: Show what we're using
+  Logger::amf_n1().debug("[DEBUG] IMSI input: %s", imsi.c_str());
+  Logger::amf_n1().debug("[DEBUG] ABBA value: 0x%04X", abba);
+  // CRITICAL FIX: Ensure consistent IMSI format for KDF
   std::string ueSupi = imsi;  // OK
   // Logger::amf_n1().debug("inputstring: supi(%s)", ueSupi.c_str());
   // int supiLen = (imsi.length()*sizeof(unsigned char))/2;
   // unsigned char * supi = (unsigned char*)calloc(1, supiLen);
   // hexStr2Byte(imsi.c_str(), supi, imsi.length());
+  if (ueSupi.rfind("imsi-", 0) == 0) {  // rfind with pos 0 checks prefix
+    ueSupi = ueSupi.substr(5);  // Remove "imsi-" (5 chars)
+    Logger::amf_n1().debug("derive_kamf: Stripped 'imsi-' prefix");
+  }
+
   OCTET_STRING_t supi;
   OCTET_STRING_fromBuf(&supi, ueSupi.c_str(), ueSupi.length());
   // uint8_t supi[8] = {0x64, 0xf0, 0x11, 0x10, 0x32, 0x54, 0x76, 0x98};
@@ -376,16 +387,38 @@ void Authentication_5gaka::derive_kamf(
   // memcpy (&S[1+supiLen], &supiLen, 2);
   S[1 + supiLen] = (uint8_t) ((supiLen & 0xff00) >> 8);
   S[2 + supiLen] = (uint8_t) (supiLen & 0x00ff);
-  S[3 + supiLen] = abba & 0x00ff;
-  S[4 + supiLen] = (abba & 0xff00) >> 8;
-  S[5 + supiLen] = 0x00;
-  S[6 + supiLen] = 0x02;
+  // ============ FIX ONLY N3IWF ============
+  if (is_n3iwf) {  // You need this variable!
+      // N3IWF: Use P1=0x0000
+      S[3 + supiLen] = 0x00;
+      S[4 + supiLen] = 0x00;
+      Logger::amf_n1().debug("[FIXED] N3IWF: Using P1=0x0000");
+  } else {
+      // 3GPP: Use actual ABBA
+      S[3 + supiLen] = abba & 0x00ff;
+      S[4 + supiLen] = (abba & 0xff00) >> 8;
+      Logger::amf_n1().debug("[FIXED] 3GPP: Using ABBA=0x%04X", abba);
+  }
+      S[5 + supiLen] = 0x00;
+      S[6 + supiLen] = 0x02;
+// =======================================
+  //S[3 + supiLen] = abba & 0x00ff;
+  //S[4 + supiLen] = (abba & 0xff00) >> 8;
+  //S[5 + supiLen] = 0x00;
+  //S[6 + supiLen] = 0x02;
   // oai::utils::output_wrapper::print_buffer("amf_n1", "inputstring S", S,
   // 7+supiLen); oai::utils::output_wrapper::print_buffer("amf_n1", "key KEY",
   // kseaf, 32);
+  // ADD DEBUG: Show full S buffer
+  Logger::amf_n1().debug("[DEBUG] Full S buffer for KDF (%d bytes):", 7 + supiLen);
+  oai::utils::output_wrapper::print_buffer(
+      "amf_n1", "[DEBUG] S buffer", S, 7 + supiLen);
   kdf(kseaf, 32, S, 7 + supiLen, kamf, 32);
   // oai::utils::output_wrapper::print_buffer("amf_n1", "KDF out: Kamf", kamf,
   // 32); Logger::amf_n1().debug("derive kamf finished!");
+  // ADD DEBUG: Show derived Kamf
+  oai::utils::output_wrapper::print_buffer(
+      "amf_n1", "[DEBUG] Derived Kamf", kamf, 32);
 }
 
 void Authentication_5gaka::derive_knas(

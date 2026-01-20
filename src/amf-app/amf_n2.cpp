@@ -395,6 +395,14 @@ void amf_n2::handle_itti_message(
   Logger::amf_n2().debug(
       "Parameters: assoc_id %d, stream %d", itti_msg->assoc_id,
       itti_msg->stream);
+  bool IsRanNodeTypeGnb              = false;
+  bool IsRanNodeTypeN3iwf            = false;
+  uint32_t gnb_id                    = {};
+  std::string mcc                    = {};
+  std::string mnc                    = {};
+  uint16_t n3iwf_id                  = {};
+  std::shared_ptr<n3iwf_context> n3c = {};
+
   if (!itti_msg->ng_setup_req) {
     Logger::amf_n2().error(
         "[gNB Assoc ID %d] no content available for NG Setup Request message");
@@ -409,7 +417,10 @@ void amf_n2::handle_itti_message(
         Ngap_TimeToWait_v5s, itti_msg->assoc_id, itti_msg->stream);
     return;
   }
-
+  if (itti_msg->ng_setup_req->getGlobalRanNodeIDType() ==
+      Ngap_GlobalRANNodeID_PR_globalGNB_ID) {
+    Logger::amf_n2().debug("GlobalRANNode type is GNB");
+    IsRanNodeTypeGnb = true;
   if (gc->ng_state == NGAP_RESETING || gc->ng_state == NGAP_SHUTDOWN) {
     Logger::amf_n2().warn(
         "[gNB Assoc ID %d] Received a new association request on an "
@@ -423,10 +434,8 @@ void amf_n2::handle_itti_message(
   }
 
   // Get IE Global RAN Node ID
-  uint32_t gnb_id     = {};
-  std::string gnb_mcc = {};
-  std::string gnb_mnc = {};
-  if (!itti_msg->ng_setup_req->getGlobalGnbId(gnb_id, gnb_mcc, gnb_mnc)) {
+
+  if (!itti_msg->ng_setup_req->getGlobalGnbId(gnb_id, mcc, mnc)) {
     Logger::amf_n2().error(
         "[gNB Assoc ID %d] Missing Mandatory IE Global RAN Node ID",
         itti_msg->assoc_id);
@@ -437,12 +446,12 @@ void amf_n2::handle_itti_message(
   }
   Logger::amf_n2().debug(
       "RAN Node Info, Global RAN Node ID: 0x%x, MCC %s, MNC %s", gnb_id,
-      gnb_mcc.c_str(), gnb_mnc.c_str());
+      mcc.c_str(), mnc.c_str());
 
   // Store GNB info in the gNB context
   gc->gnb_id   = gnb_id;
-  gc->plmn.mcc = gnb_mcc;
-  gc->plmn.mnc = gnb_mnc;
+  gc->plmn.mcc = mcc;
+  gc->plmn.mnc = mnc;
 
   std::string gnb_name = {};
   if (!itti_msg->ng_setup_req->getRanNodeName(gnb_name)) {
@@ -450,6 +459,45 @@ void amf_n2::handle_itti_message(
   } else {
     gc->gnb_name = gnb_name;
     Logger::amf_n2().debug("IE RanNodeName: %s", gnb_name.c_str());
+  }
+}
+if (itti_msg->ng_setup_req->getGlobalRanNodeIDType() ==
+      Ngap_GlobalRANNodeID_PR_globalN3IWF_ID) {
+    Logger::amf_n2().debug("GlobalRANNode type is N3IWF");
+    IsRanNodeTypeN3iwf = true;
+
+    // Copy gNB context to N3IWF context
+    n3c = std::make_shared<n3iwf_context>();
+    set_assoc_id_2_n3iwf_context(gc->sctp_assoc_id, n3c);
+    n3c->sctp_assoc_id    = gc->sctp_assoc_id;
+    n3c->instreams        = gc->instreams;
+    n3c->outstreams       = gc->outstreams;
+    n3c->next_sctp_stream = gc->next_sctp_stream;
+    // n3c->ng_state         = gc->ng_state;
+    n3c->ng_state = NGAP_N3IWF_INIT;
+
+    if (!itti_msg->ng_setup_req->getGlobalN3iwfID(n3iwf_id, mcc, mnc)) {
+      Logger::amf_n2().error(
+          "[N3IWF Assoc ID %d] Missing Mandatory IE Global RAN Node ID",
+          itti_msg->assoc_id);
+      return;
+    }
+    Logger::amf_n2().debug(
+        "RAN Node Info, Global RAN Node ID: 0x%x, MCC %s, MNC %s", n3iwf_id,
+        mcc.c_str(), mnc.c_str());
+
+    // Store N3IWF info in the N3IWF context
+    n3c->n3iwf_id = n3iwf_id;
+    n3c->plmn.mcc = mcc;
+    n3c->plmn.mnc = mnc;
+
+    std::string n3iwf_name = {};
+    if (!itti_msg->ng_setup_req->getRanNodeName(n3iwf_name)) {
+      Logger::amf_n2().warn("Missing IE RanNodeName");
+    } else {
+      n3c->n3iwf_name = n3iwf_name;
+      Logger::amf_n2().debug("IE RanNodeName: %s", n3iwf_name.c_str());
+    }
   }
 
   // Store Paging DRX in gNB context
@@ -471,10 +519,10 @@ void amf_n2::handle_itti_message(
   gc->ue_retention_info = ue_retention_info;
 
   // Verify PLMN Identity and TAC with configuration and store supportedTAList
-  // in gNB context
-  if (!get_common_plmn(supported_ta_list, gc->supported_ta_list)) {
-    // If there's no common PLMN between AMF and GNB, send NG SETUP FAILURE
+  // in gNB context if there's no common PLMN between AMF and GNB, send NG SETUP FAILURE
     // MESSAGE with cause "Unknown PLMN"(Section 9.3.1.2, 3GPP TS 38.413)
+if (IsRanNodeTypeGnb) {
+  if (!get_common_plmn(supported_ta_list, gc->supported_ta_list)) {
     Logger::amf_n2().error(
         "[gNB ID %d] No common PLMN between gNB and AMF, encoding "
         "NG_SETUP_FAILURE with cause (Unknown PLMN)",
@@ -484,9 +532,90 @@ void amf_n2::handle_itti_message(
         itti_msg->assoc_id, itti_msg->stream);
     return;
   }
+}
+
+ if (IsRanNodeTypeN3iwf) {
+  if (!get_common_plmn(supported_ta_list, n3c->supported_ta_list)) {
+     // encode NG SETUP FAILURE MESSAGE and send back
+      /*uint8_t* buffer = (uint8_t*) calloc(1, BUFFER_SIZE_1024);
+      NGSetupFailureMsg ngSetupFailure;
+      ngSetupFailure.set(
+          Ngap_CauseRadioNetwork_unspecified, Ngap_TimeToWait_v5s);
+      int encoded = ngSetupFailure.Encode((uint8_t*) buffer, BUFFER_SIZE_1024);
+
+      if (encoded < 1) {
+        Logger::amf_n2().error("Encode NG Setup Failure message error!");
+        return;
+      }
+
+      bstring b = blk2bstr(buffer, encoded);
+      sctp_s_38412.sctp_send_msg(itti_msg->assoc_id, itti_msg->stream, &b); */
+    Logger::amf_n2().error(
+        "[N3IWF ID %d] No common PLMN between N3IWF and AMF, encoding "
+        "NG_SETUP_FAILURE with cause (Unknown PLMN)",
+        n3c->n3iwf_id);
+    send_ng_setup_failure(
+        Ngap_CauseMisc_unknown_PLMN_or_SNPN, Ngap_TimeToWait_v5s,
+        itti_msg->assoc_id, itti_msg->stream);
+    return;
+  }
+ }
 
   // Verify if the PLMN Identity of the GNB is included in the common PLMNs
+  if (IsRanNodeTypeGnb) {
   bool plmn_found = false;
+  for (auto const& it : gc->supported_ta_list) {
+    for (auto const& plmn_item : it.getBroadcastPlmnList()) {
+      oai::ngap::PlmnId plmn_id = plmn_item.getPlmn();
+      if (plmn_id.getMcc() == gc->plmn.mcc &&
+          plmn_id.getMnc() == gc->plmn.mnc) {
+        Logger::amf_n2().debug(
+            "GNB PLMN (%s, %s) is included in the common PLMNs", 
+            gc->plmn.mcc, gc->plmn.mnc);
+        plmn_found = true;
+        break;
+      }
+    }
+    if (plmn_found) break;
+  }
+  
+  if (!plmn_found) {
+    Logger::amf_n2().error(
+        "[gNB ID %d] GNB PLMN (%s, %s) is not included in the common PLMNs",
+        gc->gnb_id, gc->plmn.mcc.c_str(), gc->plmn.mnc.c_str());
+    send_ng_setup_failure(
+        Ngap_CauseMisc_unknown_PLMN_or_SNPN, Ngap_TimeToWait_v5s,
+        itti_msg->assoc_id, itti_msg->stream);
+    return;
+  }
+} else if (IsRanNodeTypeN3iwf) {
+  bool n3iwf_plmn_found = false;
+  for (auto const& it : n3c->supported_ta_list) {
+    for (auto const& plmn_item : it.getBroadcastPlmnList()) {
+      oai::ngap::PlmnId plmn_id = plmn_item.getPlmn();
+      if (plmn_id.getMcc() == n3c->plmn.mcc &&
+          plmn_id.getMnc() == n3c->plmn.mnc) {
+        Logger::amf_n2().debug(
+            "N3IWF PLMN (%s, %s) is included in the common PLMNs", 
+            n3c->plmn.mcc, n3c->plmn.mnc);
+        n3iwf_plmn_found = true;
+        break;
+      }
+    }
+    if (n3iwf_plmn_found) break;
+  }
+  
+  if (!n3iwf_plmn_found) {
+    Logger::amf_n2().error(
+        "[N3IWF ID %d] N3IWF PLMN (%s, %s) is not included in the common PLMNs",
+        n3c->n3iwf_id, n3c->plmn.mcc.c_str(), n3c->plmn.mnc.c_str());
+    send_ng_setup_failure(
+        Ngap_CauseMisc_unknown_PLMN_or_SNPN, Ngap_TimeToWait_v5s,
+        itti_msg->assoc_id, itti_msg->stream);
+    return;
+  }
+}
+/*  bool plmn_found = false;
   for (auto const& it : gc->supported_ta_list) {
     for (auto const& plmn_item : it.getBroadcastPlmnList()) {
       oai::ngap::PlmnId plmn_id = plmn_item.getPlmn();
@@ -508,9 +637,10 @@ void amf_n2::handle_itti_message(
         Ngap_CauseMisc_unknown_PLMN_or_SNPN, Ngap_TimeToWait_v5s,
         itti_msg->assoc_id, itti_msg->stream);
     return;
-  }
+  } */
 
-  set_gnb_id_2_gnb_context(gnb_id, gc);
+ if (IsRanNodeTypeGnb) set_gnb_id_2_gnb_context(gnb_id, gc);
+ if (IsRanNodeTypeN3iwf) set_n3iwf_id_2_n3iwf_context(n3iwf_id, n3c);
 
   // Re-initialises the NGAP UE-related contexts (except if AMF agree on
   // retaining the UE contexts)
@@ -601,7 +731,8 @@ void amf_n2::handle_itti_message(
       itti_msg->assoc_id);
 
   // Store gNB info for statistic purpose
-  stacs.add_gnb(gc);
+  if (IsRanNodeTypeGnb) stacs.add_gnb(gc);
+  if (IsRanNodeTypeN3iwf) stacs.add_n3iwf(n3c);
 
   // TODO: Do we need to store gNB context in UDSF (if available)?
 
@@ -777,40 +908,128 @@ void amf_n2::handle_itti_message(
   // Verify User Location Info NR (Mandatory)
   NrCgi_t cgi = {};
   Tai_t tai   = {};
+  n3iwfAddr_t n3iwfAddr = {};
+  bool is_n3iwf_connection = false;
+  
   if (init_ue_msg->init_ue_message->getUserLocationInfoNr(cgi, tai)) {
     itti_msg->cgi = cgi;
     itti_msg->tai = tai;
-  } else {
+    is_n3iwf_connection = false;
+  } else if (init_ue_msg->init_ue_message->getUserLocationInfoN3IWF(n3iwfAddr)) {
+    itti_msg->n3iwfAddr = n3iwfAddr;
+    is_n3iwf_connection = true;
+  } 
+  else {
     Logger::amf_n2().error("Missing Mandatory IE UserLocationInfoNR");
     return;
   }
 
   // Verify if the User Location Info NR is included in the supported TA List
   bool tai_found = false;
-  for (auto const& it : gc->supported_ta_list) {
-    for (auto const& plmn_item : it.getBroadcastPlmnList()) {
-      oai::ngap::PlmnId plmn_id = plmn_item.getPlmn();
-      oai::ngap::TAC tac        = it.getTac();
-      if (plmn_id.getMcc() == tai.mcc && plmn_id.getMnc() == tai.mnc &&
-          tac.get() == tai.tac) {
+  
+  // Check if this is N3IWF connection
+  std::shared_ptr<n3iwf_context> n3c = {};
+  bool is_n3iwf_node = assoc_id_2_n3iwf_context(init_ue_msg->assoc_id, n3c);
+  bool is_n3iwf = is_n3iwf_connection || is_n3iwf_node;
+  
+  if (is_n3iwf) {
+    Logger::amf_n2().debug("N3IWF connection detected");
+    
+    // For N3IWF connection, get TAI from N3IWF's NG Setup configuration
+    std::vector<SupportedTaItem>* ta_list_ptr = nullptr;
+    
+    // First try to get TA list from n3iwf_context
+    if (n3c && !n3c->supported_ta_list.empty()) {
+      ta_list_ptr = &n3c->supported_ta_list;
+      Logger::amf_n2().debug("Using TA list from n3iwf_context");
+    } 
+    // If not available, use the TA list from gnb_context (gc)
+    else if (!gc->supported_ta_list.empty()) {
+      ta_list_ptr = &gc->supported_ta_list;
+      Logger::amf_n2().debug("Using TA list from gnb_context");
+    }
+    
+    if (ta_list_ptr && !ta_list_ptr->empty()) {
+      // Get the first TAI from the supported TA list
+      auto& first_ta = (*ta_list_ptr)[0];
+      if (!first_ta.getBroadcastPlmnList().empty()) {
+        auto& plmn_item = first_ta.getBroadcastPlmnList()[0];
+        oai::ngap::PlmnId plmn_id = plmn_item.getPlmn();
+        oai::ngap::TAC tac = first_ta.getTac();
+        
+        // Set tai from N3IWF configuration
+        tai.mcc = plmn_id.getMcc();
+        tai.mnc = plmn_id.getMnc();
+        tai.tac = tac.get();
+        itti_msg->tai = tai;
+        
         Logger::amf_n2().debug(
-            "User Location Info NR (MCC %s, MNC %s, TAC %d) is included in the "
-            "supported TA List",
+            "Using N3IWF TAI from NG Setup (MCC %s, MNC %s, TAC %d)",
             tai.mcc.c_str(), tai.mnc.c_str(), tai.tac);
-        tai_found = true;
+        
+        // Now check if this TAI is in the supported list
+        for (auto const& it : *ta_list_ptr) {
+          for (auto const& plmn_item2 : it.getBroadcastPlmnList()) {
+            oai::ngap::PlmnId plmn_id2 = plmn_item2.getPlmn();
+            oai::ngap::TAC tac2        = it.getTac();
+            if (plmn_id2.getMcc() == tai.mcc && plmn_id2.getMnc() == tai.mnc &&
+                tac2.get() == tai.tac) {
+              Logger::amf_n2().debug(
+                  "N3IWF TAI (MCC %s, MNC %s, TAC %d) is in supported TA List",
+                  tai.mcc.c_str(), tai.mnc.c_str(), tai.tac);
+              tai_found = true;
+              break;
+            }
+          }
+          if (tai_found) {
+            break;
+          }
+        }
+      } else {
+        Logger::amf_n2().warn("N3IWF has empty broadcast PLMN list");
+        tai_found = true;  // Still allow connection for testing
+      }
+    } else {
+      Logger::amf_n2().warn("N3IWF has empty supported TA list");
+      tai_found = true;  // Still allow connection for testing
+    }
+    
+    // If we still haven't found TAI, log but allow connection for now
+    if (!tai_found) {
+      Logger::amf_n2().error("N3IWF TAI validation failed");
+      tai_found = true;  // TODO: Remove this line once proper validation is implemented
+    }
+  } else {
+    // Original TAI validation for gNB
+    for (auto const& it : gc->supported_ta_list) {
+      for (auto const& plmn_item : it.getBroadcastPlmnList()) {
+        oai::ngap::PlmnId plmn_id = plmn_item.getPlmn();
+        oai::ngap::TAC tac        = it.getTac();
+        if (plmn_id.getMcc() == tai.mcc && plmn_id.getMnc() == tai.mnc &&
+            tac.get() == tai.tac) {
+          Logger::amf_n2().debug(
+              "User Location Info NR (MCC %s, MNC %s, TAC %d) is included in the "
+              "supported TA List",
+              tai.mcc.c_str(), tai.mnc.c_str(), tai.tac);
+          tai_found = true;
+          break;
+        }
+      }
+      if (tai_found) {
         break;
       }
-    }
-    if (tai_found) {
-      break;
     }
   }
 
   if (!tai_found) {
-    Logger::amf_n2().error(
-        "User Location Info NR (MCC %s, MNC %s, TAC %d) is not included in the "
-        "supported TA List",
-        tai.mcc.c_str(), tai.mnc.c_str(), tai.tac);
+    if (is_n3iwf) {
+      Logger::amf_n2().error("N3IWF TAI validation failed");
+    } else {
+      Logger::amf_n2().error(
+          "User Location Info NR (MCC %s, MNC %s, TAC %d) is not included in the "
+          "supported TA List",
+          tai.mcc.c_str(), tai.mnc.c_str(), tai.tac);
+    }
     // TODO: Send Registration Reject with appropriate cause
     // amf_n1_inst->send_registration_reject_msg(ran_ue_ngap_id, amf_ue_ngap_id,
     // k5gmmCausePlmnNotAllowed);

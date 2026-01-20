@@ -141,7 +141,7 @@ class Authentication_5gaka {
   static void derive_kseaf(
       std::string serving_network, uint8_t kausf[32], uint8_t kseaf[32]);
   static void derive_kamf(
-      std::string imsi, uint8_t* kseaf, uint8_t* kamf, uint16_t abba);
+      std::string imsi, uint8_t* kseaf, uint8_t* kamf, uint16_t abba, bool is_n3iwf = false);
   static void derive_knas(
       algorithm_type_dist_t nas_alg_type, uint8_t nas_alg_id, uint8_t kamf[32],
       uint8_t* knas);

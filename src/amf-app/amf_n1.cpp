@@ -62,6 +62,7 @@
 #include "itti_msg_sbi.hpp"
 #include "logger.hpp"
 #include "nas_algorithms.hpp"
+#include "n3iwf_context.hpp" 
 #include "ngap_utils.hpp"
 #include "output_wrapper.hpp"
 #include "sha256.hpp"
@@ -1648,23 +1649,58 @@ bool amf_n1::registration_request_handle(
       if (!registration_request->GetSuciSupiFormatImsi(imsi)) {
         Logger::amf_n1().warn("No SUCI and IMSI for SUPI Format");
       } else {
-        // Verify PLMN
-        std::shared_ptr<gnb_context> gc = {};
-        if (!amf_n2_inst->assoc_id_2_gnb_context(unc->gnb_assoc_id, gc)) {
-          Logger::amf_n1().error(
-              "No existed gNB context with assoc_id (%d)", unc->gnb_assoc_id);
-          return false;
-        }
+   // ========== MODIFIED: Check PLMN for both gNB and N3IWF connections ==========
+        // First, try to get N3IWF context (for non-3GPP access)
+        std::shared_ptr<n3iwf_context> n3c = {};
+        bool is_n3iwf = amf_n2_inst->assoc_id_2_n3iwf_context(unc->gnb_assoc_id, n3c);
 
-        if (imsi.mcc != gc->plmn.mcc || imsi.mnc != gc->plmn.mnc) {
-          Logger::amf_n1().error(
-              "PLMN (MCC %s, MNC %s ) in SUCI does not match with gNB PLMN "
-              "(MCC %s, MNC %s)",
-              imsi.mcc, imsi.mnc, gc->plmn.mcc, gc->plmn.mnc);
-          // Send Registration Reject with appropriate cause
-          send_registration_reject_msg(
-              ran_ue_ngap_id, amf_ue_ngap_id, k5gmmCausePlmnNotAllowed);
-          return false;
+        if (is_n3iwf && n3c) {
+            // This is an N3IWF (non-3GPP) connection
+            Logger::amf_n1().debug(
+                "N3IWF connection detected: %s (ID: %d)", 
+                n3c->n3iwf_name.c_str(), n3c->n3iwf_id);
+
+            // ADD THESE 2 LINES:
+            nc->is_n3iwf_connection = true;
+            Logger::amf_n1().debug("Setting is_n3iwf_connection = true for NAS context");
+            
+            // Use PLMN from N3IWF context
+            // Note: N3IWF PLMN should be set during NG Setup
+            if (imsi.mcc != n3c->plmn.mcc || imsi.mnc != n3c->plmn.mnc) {
+                Logger::amf_n1().error(
+                    "PLMN (MCC %s, MNC %s) in SUCI does not match with N3IWF PLMN "
+                    "(MCC %s, MNC %s)",
+                    imsi.mcc, imsi.mnc, n3c->plmn.mcc, n3c->plmn.mnc);
+                // Send Registration Reject with appropriate cause
+                send_registration_reject_msg(
+                    ran_ue_ngap_id, amf_ue_ngap_id, k5gmmCausePlmnNotAllowed);
+                return false;
+            }
+            
+            Logger::amf_n1().debug(
+                "PLMN check passed for N3IWF connection: MCC=%s, MNC=%s",
+                n3c->plmn.mcc, n3c->plmn.mnc);
+        } else {
+            // Regular gNB (3GPP) connection
+            // ADD THIS LINE:
+            nc->is_n3iwf_connection = false;
+            std::shared_ptr<gnb_context> gc = {};
+            if (!amf_n2_inst->assoc_id_2_gnb_context(unc->gnb_assoc_id, gc)) {
+                Logger::amf_n1().error(
+                    "No existed gNB context with assoc_id (%d)", unc->gnb_assoc_id);
+                return false;
+            }
+            
+            if (imsi.mcc != gc->plmn.mcc || imsi.mnc != gc->plmn.mnc) {
+                Logger::amf_n1().error( 
+                    "PLMN (MCC %s, MNC %s ) in SUCI does not match with gNB PLMN "
+                    "(MCC %s, MNC %s)",
+                    imsi.mcc, imsi.mnc, gc->plmn.mcc, gc->plmn.mnc);
+                // Send Registration Reject with appropriate cause
+                send_registration_reject_msg(
+                    ran_ue_ngap_id, amf_ue_ngap_id, k5gmmCausePlmnNotAllowed);
+                return false;
+            }
         }
 
         if (!nc) {
@@ -2365,15 +2401,27 @@ bool amf_n1::auth_vectors_generator(std::shared_ptr<nas_context>& nc) {
              .authentication_vectors_generator_in_ausf(nc))
       return false;
     Logger::amf_n1().debug("Deriving kamf");
+    // Determine ABBA value based on connection type
+    uint16_t abba_value = 0x0000;  // Default: 3GPP
+
+    if (nc->is_n3iwf_connection) {
+      // Use a special value to indicate N3IWF
+      // Let's use: 0x0001 (low byte = 0x01 means N3IWF)
+      abba_value = 0x0001;
+      Logger::amf_n1().debug("[KAMF] N3IWF connection detected, using ABBA=0x%04X", abba_value);
+    }
+    // DEBUG: Show connection type
+    Logger::amf_n1().debug("[DEBUG] Calling derive_kamf for IMSI: %s, is_n3iwf: %d, ABBA: 0x%04X", 
+                          nc->imsi.c_str(), nc->is_n3iwf_connection, abba_value);
     for (int i = 0; i < MAX_5GS_AUTH_VECTORS; i++) {
       Authentication_5gaka::derive_kamf(
           nc->imsi, nc->_5g_av[i].kseaf, nc->kamf[i],
-          0x0000);  // second parameter: abba
+          abba_value, nc->is_n3iwf_connection);  // second parameter: abba
                     // TODO: remove hardcoded value
     }
   }
   return true;
-}
+ }
 
 //------------------------------------------------------------------------------
 bool amf_n1::get_authentication_vectors_from_ausf(
@@ -2503,7 +2551,7 @@ bool amf_n1::get_authentication_vectors_from_ausf(
   oai::utils::utils::free_wrapper((void**) &r5g_auth_data_hxresstar);
 
   std::map<std::string, LinksValueSchema>::iterator iter;
-  iter = (ue_authentication_ctx.getLinks()).find("5g-aka");
+  iter = (ue_authentication_ctx.getLinks()).find("5G_AKA");
 
   if (iter != (ue_authentication_ctx.getLinks()).end()) {
     nc->href = iter->second.getHref();
@@ -2611,10 +2659,21 @@ bool amf_n1::_5g_aka_confirmation_from_ausf(
         oai::utils::utils::free_wrapper((void**) &kseaf_hex);
 
         Logger::amf_n1().debug("Deriving Kamf");
+        Logger::amf_n1().debug("Deriving Kamf for IMSI: %s", nc->imsi.c_str());
+        // Determine ABBA value based on connection type
+        uint16_t abba_value = 0x0000;  // Default: 3GPP
+
+        if (nc->is_n3iwf_connection) {
+          abba_value = 0x0001;  // Flag for N3IWF
+          Logger::amf_n1().debug("[KAMF-CALL-2] N3IWF connection, using ABBA=0x%04X", abba_value);
+        }
+
+        Logger::amf_n1().debug("[DEBUG] Calling derive_kamf (2) for IMSI: %s, is_n3iwf: %d, ABBA: 0x%04X",
+                              nc->imsi.c_str(), nc->is_n3iwf_connection, abba_value);
         for (int i = 0; i < MAX_5GS_AUTH_VECTORS; i++) {
           Authentication_5gaka::derive_kamf(
               nc->imsi, nc->_5g_av[i].kseaf, nc->kamf[i],
-              0x0000);  // second parameter: abba
+              abba_value, nc->is_n3iwf_connection);  // Use determined ABBA value
           oai::utils::output_wrapper::print_buffer(
               "amf_n1", "Kamf", nc->kamf[i], AUTH_VECTOR_LENGTH_OCTETS);
         }
@@ -2942,10 +3001,15 @@ void amf_n1::authentication_failure_handle(
   }
 }
 
+
 //------------------------------------------------------------------------------
 bool amf_n1::start_security_mode_control_procedure(
     std::shared_ptr<nas_context>& nc) {
   Logger::amf_n1().debug("Start Security Mode Control procedure");
+  // ADD DEBUG: Show current state
+  Logger::amf_n1().debug("[DEBUG-SMC] is_n3iwf_connection: %d", 
+                        nc->is_n3iwf_connection);
+  Logger::amf_n1().debug("[DEBUG-SMC] imsi: %s", nc->imsi.c_str());
   nc->is_common_procedure_for_security_mode_control_running = true;
   bool security_context_is_new                              = false;
   uint8_t amf_nea                                           = kEa0_5g;
@@ -2974,6 +3038,26 @@ bool amf_n1::start_security_mode_control_procedure(
     nc->security_ctx.value().nas_algs.integrity  = amf_nia;
     nc->security_ctx.value().nas_algs.encryption = amf_nea;
     nc->security_ctx.value().sc_type = SECURITY_CTX_TYPE_FULL_NATIVE;
+    // ADD THESE LINES - Set access_type and bearer based on connection type
+    if (nc->is_n3iwf_connection) {
+        nc->security_ctx.value().access_type = KAccessTypeNon3gppAccess;
+        nc->security_ctx.value().bearer = 0;
+        Logger::amf_n1().debug("Setting security context for N3IWF: access_type=0x%02x, bearer=%d", 
+                              KAccessTypeNon3gppAccess, 0);
+    } else {
+        nc->security_ctx.value().access_type = KAccessType3gppAccess;
+        nc->security_ctx.value().bearer = 1;
+        Logger::amf_n1().debug("Setting security context for 3GPP: access_type=0x%02x, bearer=%d", 
+                              KAccessType3gppAccess, 1);
+    }
+    
+    // ADD DEBUG: Show Kamf being used
+    int vindex = nc->security_ctx.value().vector_pointer;
+    Logger::amf_n1().debug("[DEBUG-SMC] Using Kamf vector index: %d", vindex);
+    oai::utils::output_wrapper::print_buffer(
+      "amf_n1", "[DEBUG-SMC] Kamf for derivation", 
+      nc->kamf[vindex], AUTH_VECTOR_LENGTH_OCTETS);
+
     Authentication_5gaka::derive_knas(
         NAS_INT_ALG, nc->security_ctx.value().nas_algs.integrity,
         nc->kamf[nc->security_ctx.value().vector_pointer],
@@ -3622,11 +3706,11 @@ bool amf_n1::nas_message_integrity_protected(
   stream_cipher.count      = *(input_nas);
   // stream_cipher.count = count;
   if (!direction) {
-    nsc.ul_count.seq_num = stream_cipher.count;
+    nsc.ul_count.seq_num = *(input_nas);
     Logger::amf_n1().debug("Uplink count in uplink: %d", nsc.ul_count.seq_num);
   }
   Logger::amf_n1().debug("Parameters for NIA, count: 0x%x", count);
-  stream_cipher.bearer = 0x01;  // 33.501 section 8.1.1
+  stream_cipher.bearer = nsc.bearer;  // Use value from security context
   Logger::amf_n1().debug(
       "Parameters for NIA, bearer: 0x%x", stream_cipher.bearer);
   stream_cipher.direction = direction;  // "1" for downlink
@@ -3662,6 +3746,18 @@ bool amf_n1::nas_message_integrity_protected(
       return true;
     } break;
   }
+  // Add these debug logs in nas_message_integrity_protected function:
+  Logger::amf_n1().debug("=== NIA2 DEBUG ===");
+  Logger::amf_n1().debug("KnasInt: %02x %02x %02x %02x ...", 
+                        nsc.knas_int[0], nsc.knas_int[1], nsc.knas_int[2], nsc.knas_int[3]);
+  Logger::amf_n1().debug("Count: 0x%08x", stream_cipher.count);
+  Logger::amf_n1().debug("Bearer: 0x%02x", stream_cipher.bearer);
+  Logger::amf_n1().debug("Direction: 0x%02x", stream_cipher.direction);
+  Logger::amf_n1().debug("Message length: %d bits", stream_cipher.blength);
+  Logger::amf_n1().debug("First 16 bytes of message:");
+  for(int i=0; i<16 && i<input_nas_len; i++) {
+    Logger::amf_n1().debug("  [%d]: 0x%02x", i, input_nas[i]);
+  }
   return true;
 }
 
@@ -3685,7 +3781,7 @@ bool amf_n1::nas_message_cipher_protected(
   stream_cipher.key        = nsc.knas_enc;
   stream_cipher.key_length = AUTH_KNAS_ENC_SIZE;
   stream_cipher.count      = count;
-  stream_cipher.bearer     = 0x01;       // 33.501 section 8.1.1
+  stream_cipher.bearer     = nsc.bearer;       // Use value from security context
   stream_cipher.direction  = direction;  // "1" for downlink
   stream_cipher.message    = (uint8_t*) bdata(input_nas);
   stream_cipher.blength    = blength(input_nas) << 3;

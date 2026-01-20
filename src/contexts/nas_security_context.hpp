@@ -68,6 +68,8 @@ class nas_secu_ctx {
   count_t ul_count;
   capability_t ue_algorithms;
   selected_algs nas_algs;
+  uint8_t access_type;  // KAccessType3gppAccess (0x01) or KAccessTypeNon3gppAccess (0x02)
+  uint8_t bearer;
 };
 
 #endif
