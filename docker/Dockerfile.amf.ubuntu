@@ -40,6 +40,10 @@ RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install --yes \
       cmake \
       build-essential \
+      pkg-config \
+      libssl-dev \
+      nettle-dev \
+      libgmp-dev \
       psmisc \
       git \
   && rm -rf /var/lib/apt/lists/*
