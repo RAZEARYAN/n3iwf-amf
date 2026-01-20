@@ -3038,7 +3038,7 @@ bool amf_n1::start_security_mode_control_procedure(
     nc->security_ctx.value().nas_algs.integrity  = amf_nia;
     nc->security_ctx.value().nas_algs.encryption = amf_nea;
     nc->security_ctx.value().sc_type = SECURITY_CTX_TYPE_FULL_NATIVE;
-    // ADD THESE LINES - Set access_type and bearer based on connection type
+    // ADD LINES - Set access_type and bearer based on connection type
     if (nc->is_n3iwf_connection) {
         nc->security_ctx.value().access_type = KAccessTypeNon3gppAccess;
         nc->security_ctx.value().bearer = 0;
@@ -3051,7 +3051,7 @@ bool amf_n1::start_security_mode_control_procedure(
                               KAccessType3gppAccess, 1);
     }
     
-    // ADD DEBUG: Show Kamf being used
+    // ADD DEBUG
     int vindex = nc->security_ctx.value().vector_pointer;
     Logger::amf_n1().debug("[DEBUG-SMC] Using Kamf vector index: %d", vindex);
     oai::utils::output_wrapper::print_buffer(
