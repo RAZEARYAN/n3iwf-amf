@@ -87,6 +87,11 @@ FROM oai-amf-base AS oai-amf-builder
 ARG ENABLE_LTTNG=false
 
 COPY . /openair-amf
+
+# Disable treating warnings as errors (needed for ASN.1 generated code)
+ENV CFLAGS="-Wno-error=overflow -Wno-error"
+ENV CXXFLAGS="-Wno-error=overflow -Wno-error"
+
 # Building AMF
 WORKDIR /openair-amf/build/scripts
 RUN  if [ "$ENABLE_LTTNG" = "true" ]; then DEBIAN_FRONTEND=noninteractive apt-get install --yes \
