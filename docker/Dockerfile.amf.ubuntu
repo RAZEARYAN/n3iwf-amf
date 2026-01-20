@@ -38,53 +38,9 @@ ENV IS_DOCKERFILE=1
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes && \
     DEBIAN_FRONTEND=noninteractive apt-get install --yes \
-      build-essential \
-      cmake \
-      pkg-config \
-      git \
       psmisc \
-      libssl-dev \
-      nettle-dev \
-      libgmp-dev \
-      libsctp-dev \
-      lksctp-tools \
-      libgnutls28-dev \
-      libcurl4-openssl-dev \
-      python3 \
-      python3-pip \
-      libmysqlclient-dev \
-      libboost-all-dev \
-      nlohmann-json3-dev \
-      libfmt-dev \
-      meson \
-      ninja-build \
+      git \
   && rm -rf /var/lib/apt/lists/*
-
-# ---- Build Pistache from source (required for Ubuntu 22.04) ----
-RUN git clone https://github.com/pistacheio/pistache.git /tmp/pistache && \
-    cd /tmp/pistache && \
-    git checkout 0.0.5 && \
-    meson setup build --buildtype=release && \
-    ninja -C build && \
-    ninja -C build install && \
-    ldconfig && \
-    rm -rf /tmp/pistache
-
-
-# ---------------------------------------------------------------------
-# Build and install CPR from source (required by common-src)
-# ---------------------------------------------------------------------
-WORKDIR /tmp
-RUN git clone https://github.com/libcpr/cpr.git && \
-    cd cpr && \
-    git checkout 1.10.5 && \
-    cmake -S . -B build \
-      -DCPR_USE_SYSTEM_CURL=ON \
-      -DBUILD_SHARED_LIBS=ON && \
-    cmake --build build --parallel && \
-    cmake --install build && \
-    ldconfig && \
-    cd / && rm -rf /tmp/cpr
 
 # Some GIT configuration commands quite useful
 RUN git config --global https.postBuffer 123289600 && \
@@ -108,11 +64,6 @@ FROM oai-amf-base AS oai-amf-builder
 ARG ENABLE_LTTNG=false
 
 COPY . /openair-amf
-
-# Disable treating warnings as errors (needed for ASN.1 generated code)
-ENV CFLAGS="-Wno-error=overflow -Wno-error"
-ENV CXXFLAGS="-Wno-error=overflow -Wno-error"
-
 # Building AMF
 WORKDIR /openair-amf/build/scripts
 RUN  if [ "$ENABLE_LTTNG" = "true" ]; then DEBIAN_FRONTEND=noninteractive apt-get install --yes \
@@ -238,3 +189,4 @@ HEALTHCHECK --interval=10s \
     CMD /openair-amf/bin/healthcheck.sh
 
 CMD ["/openair-amf/bin/oai_amf", "-c", "/openair-amf/etc/config.yaml", "-o"]
+
