@@ -46,10 +46,24 @@ RUN apt-get update && \
       libgmp-dev \
       libmysqlclient-dev \
       libcurl4-gnutls-dev \
-      libcpr-dev \
       psmisc \
       git \
   && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------
+# Build and install CPR from source (required by common-src)
+# ---------------------------------------------------------------------
+WORKDIR /tmp
+RUN git clone https://github.com/libcpr/cpr.git && \
+    cd cpr && \
+    git checkout 1.10.5 && \
+    cmake -S . -B build \
+      -DCPR_USE_SYSTEM_CURL=ON \
+      -DBUILD_SHARED_LIBS=ON && \
+    cmake --build build --parallel && \
+    cmake --install build && \
+    ldconfig && \
+    cd / && rm -rf /tmp/cpr
 
 # Some GIT configuration commands quite useful
 RUN git config --global https.postBuffer 123289600 && \
