@@ -61,11 +61,7 @@ RUN apt-get update && \
 RUN git clone https://github.com/pistacheio/pistache.git /tmp/pistache && \
     cd /tmp/pistache && \
     git checkout 0.0.5 && \
-    meson setup build \
-      --buildtype=release \
-      -Dexamples=false \
-      -Dtests=false \
-      -Dssl=true && \
+    meson setup build --buildtype=release && \
     ninja -C build && \
     ninja -C build install && \
     ldconfig && \
