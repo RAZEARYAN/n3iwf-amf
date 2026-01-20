@@ -44,6 +44,8 @@ RUN apt-get update && \
       libssl-dev \
       nettle-dev \
       libgmp-dev \
+      meson \
+      ninja-build \
       libmysqlclient-dev \
       libcurl4-gnutls-dev \
       psmisc \
