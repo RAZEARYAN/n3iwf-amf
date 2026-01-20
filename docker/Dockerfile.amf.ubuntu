@@ -56,9 +56,10 @@ RUN git config --global https.postBuffer 123289600 && \
 
 # Copying source code
 WORKDIR /openair-amf/
-COPY ./build/scripts /openair-amf/build/scripts
-COPY ./build/common-build /openair-amf/build/common-build
-COPY ./build/amf/CMakeLists.txt /openair-amf/build/amf/CMakeLists.txt
+COPY ./build /openair-amf/build
+#COPY ./build/scripts /openair-amf/build/scripts
+#COPY ./build/common-build /openair-amf/build/common-build
+#COPY ./build/amf/CMakeLists.txt /openair-amf/build/amf/CMakeLists.txt
 
 # Installing all the needed libraries/packages to build and run AMF
 WORKDIR /openair-amf/build/scripts
